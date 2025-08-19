@@ -34,7 +34,7 @@ private:
     void drawSetupScreen();
     void drawAlarmStatusScreen();
     void drawAlarmTriggeredScreen();
-    String formatTime(int hour, int minute);
+    String formatTime(int hour, int minute) const;
     void checkAlarmTime();
     
 public:

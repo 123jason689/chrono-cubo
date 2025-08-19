@@ -20,7 +20,7 @@
 // Input Control Pins
 #define POT_X_PIN 0
 #define POT_Y_PIN 1
-#define BTN_SELECT 2
+#define BTN_SELECT 3
 
 // Hardware Settings
 #define POT_DEADZONE 100

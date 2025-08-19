@@ -1,5 +1,9 @@
 #include "StateMachine.h"
 #include "configs.h"
+#include "SingleTimer.h"
+#include "MultiTimer.h"
+#include "AlarmClock.h"
+#include "TimeManager.h"
 
 StateMachine::StateMachine(Adafruit_SSD1306* displayInstance) 
     : display(displayInstance), currentState(STATE_MAIN_MENU), previousState(STATE_MAIN_MENU),
@@ -57,6 +61,13 @@ void StateMachine::update() {
             handleTimeDisplay();
             break;
     }
+}
+
+void StateMachine::attachModules(SingleTimer* st, MultiTimer* mt, AlarmClock* ac, TimeManager* tm) {
+    singleTimerModule = st;
+    multiTimerModule = mt;
+    alarmClockModule = ac;
+    timeManagerModule = tm;
 }
 
 void StateMachine::handleMainMenu() {
@@ -141,81 +152,64 @@ void StateMachine::drawMenuItem(int index, bool selected) {
 }
 
 void StateMachine::handleSingleTimerSetup() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!singleTimerModule || !display) return;
+    // Delegate drawing to SingleTimer
+    singleTimerModule->drawCurrentScreen();
 }
 
 void StateMachine::handleSingleTimerRunning() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!singleTimerModule || !display) return;
+    singleTimerModule->drawCurrentScreen();
 }
 
 void StateMachine::handleSingleTimerFinished() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!singleTimerModule || !display) return;
+    singleTimerModule->drawCurrentScreen();
 }
 
 void StateMachine::handleMultiTimerSelect() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!multiTimerModule || !display) return;
+    multiTimerModule->drawCurrentScreen();
 }
 
 void StateMachine::handleMultiTimerRunning() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!multiTimerModule || !display) return;
+    multiTimerModule->drawCurrentScreen();
 }
 
 void StateMachine::handleMultiTimerFinished() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!multiTimerModule || !display) return;
+    multiTimerModule->drawCurrentScreen();
 }
 
 void StateMachine::handleAlarmSetup() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!alarmClockModule || !display) return;
+    alarmClockModule->drawCurrentScreen();
 }
 
 void StateMachine::handleAlarmRunning() {
-    // This state is handled in main.cpp
-    // Just return to main menu if button is pressed
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!alarmClockModule || !display) return;
+    alarmClockModule->drawCurrentScreen();
 }
 
 void StateMachine::handleSettings() {
-    // Placeholder for future implementation
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!display) return;
+    display->clearDisplay();
+    display->setTextSize(1);
+    display->setTextColor(SSD1306_WHITE);
+    display->setCursor(0, 0);
+    display->println("Settings");
+    display->println("========");
+    display->setCursor(0, 16);
+    display->println("Use main menu to manage.");
+    display->setCursor(0, 56);
+    display->println("Press button to return");
+    display->display();
 }
 
 void StateMachine::handleTimeDisplay() {
-    // Simple time display state
-    if (select_button_pressed()) {
-        transitionTo(STATE_MAIN_MENU);
-    }
+    if (!timeManagerModule || !display) return;
+    timeManagerModule->displayCurrentTime();
 }
 
 void StateMachine::setState(AppState newState) {

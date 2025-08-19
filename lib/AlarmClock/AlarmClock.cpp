@@ -279,7 +279,7 @@ void AlarmClock::drawAlarmTriggeredScreen() {
     display->display();
 }
 
-String AlarmClock::formatTime(int hour, int minute) {
+String AlarmClock::formatTime(int hour, int minute) const {
     char timeStr[6];
     sprintf(timeStr, "%02d:%02d", hour, minute);
     return String(timeStr);
@@ -291,7 +291,8 @@ void AlarmClock::reset() {
     alarmEnabled = false;
     alarmHour = 7;
     alarmMinute = 30;
-    editingHour = true;
+    alarmSoundTrack = 3;
+    setupState = 0;
     lastAlarmCheck = 0;
     alarmTriggerTime = 0;
 }

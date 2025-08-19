@@ -5,6 +5,12 @@
 #include <Adafruit_SSD1306.h>
 #include "KeyInput.h"
 
+// Forward declarations to avoid heavy includes in header
+class SingleTimer;
+class MultiTimer;
+class AlarmClock;
+class TimeManager;
+
 // Application states
 enum AppState {
     STATE_MAIN_MENU,
@@ -44,6 +50,12 @@ private:
     AppState previousState;
     Adafruit_SSD1306* display;
     
+    // Connected modules used for drawing state UIs
+    SingleTimer* singleTimerModule = nullptr;
+    MultiTimer* multiTimerModule = nullptr;
+    AlarmClock* alarmClockModule = nullptr;
+    TimeManager* timeManagerModule = nullptr;
+    
     // Menu navigation
     int selectedMenuItem;
     int menuItemCount;
@@ -73,6 +85,9 @@ private:
 public:
     // Constructor
     StateMachine(Adafruit_SSD1306* displayInstance);
+    
+    // Wire up modules so the state machine can render their screens
+    void attachModules(SingleTimer* st, MultiTimer* mt, AlarmClock* ac, TimeManager* tm);
     
     // State management
     void initialize();

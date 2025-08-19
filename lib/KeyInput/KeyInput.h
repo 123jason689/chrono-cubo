@@ -17,6 +17,9 @@ int get_y_movement();
 // Check if the select button was pressed with debouncing
 bool select_button_pressed();
 
+// Rate limit helper used by UI loops
+bool can_move();
+
 // Draw the keyboard interface
 void draw_keyboard(uint8_t cursor_x, uint8_t cursor_y, const char* current_text);
 

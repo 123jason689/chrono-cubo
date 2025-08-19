@@ -268,7 +268,8 @@ void SingleTimer::reset() {
     remainingTime = 0;
     setupMinutes = 0;
     setupSeconds = 0;
-    editingMinutes = true;
+    setupSoundTrack = 1;
+    setupState = 0;
 }
 
 void SingleTimer::pause() {
