@@ -124,7 +124,7 @@ void AlarmClock::checkAlarmTime() {
             notificationManager.playAlert(3, 25);
             // Push notification
             if (pushNotifier) {
-                pushNotifier->sendNotification("Chrono-Cubo Alarm", "Time to wake up!");
+                pushNotifier->sendAll("Chrono-Cubo Alarm", "Time to wake up!");
             }
             drawAlarmTriggeredScreen();
         }

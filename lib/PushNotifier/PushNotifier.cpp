@@ -5,22 +5,15 @@
 PushNotifier::PushNotifier(Preferences* prefs) : preferences(prefs) {}
 
 void PushNotifier::begin() {
-    if (!preferences) return;
-    preferences->begin("notifier", true); // read-only
-    accountKey = preferences->getString("alertzyKey", "");
-    preferences->end();
+    // No-op here; accounts are injected via setAccounts from StorageManager
 }
 
-bool PushNotifier::hasAccountKey() {
-    return accountKey.length() > 0;
+void PushNotifier::setAccounts(const std::vector<AlertzyAccount>& list) {
+    accounts = list;
 }
 
-void PushNotifier::setAccountKey(String key) {
-    accountKey = key;
-    if (!preferences) return;
-    preferences->begin("notifier", false);
-    preferences->putString("alertzyKey", accountKey);
-    preferences->end();
+const std::vector<AlertzyAccount>& PushNotifier::getAccounts() const {
+    return accounts;
 }
 
 String PushNotifier::urlEncode(String str) {
@@ -45,9 +38,22 @@ String PushNotifier::urlEncode(String str) {
     return encoded;
 }
 
-void PushNotifier::sendNotification(String title, String message) {
+void PushNotifier::sendNotification(String title, String message, const std::vector<uint8_t>& key_indices) {
     if (WiFi.status() != WL_CONNECTED) return;
-    if (!hasAccountKey()) return;
+    if (accounts.empty()) return;
+
+    // Build a single underscore-concatenated accountKey string per Alertzy docs
+    String combinedKeys = "";
+    bool first = true;
+    for (uint8_t idx : key_indices) {
+        if (idx >= accounts.size()) continue;
+        const String& key = accounts[idx].key;
+        if (key.length() == 0) continue;
+        if (!first) combinedKeys += "_";
+        combinedKeys += key;
+        first = false;
+    }
+    if (combinedKeys.length() == 0) return;
 
     HTTPClient http;
     const char* endpoint = "https://alertzy.app/send";
@@ -57,12 +63,18 @@ void PushNotifier::sendNotification(String title, String message) {
 
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
-    String body = String("accountKey=") + accountKey +
+    String body = String("accountKey=") + combinedKeys +
                   "&title=" + urlEncode(title) +
                   "&message=" + urlEncode(message);
 
     int httpCode = http.POST(body);
-    // Optionally log httpCode for debugging
     (void)httpCode;
     http.end();
+}
+
+void PushNotifier::sendAll(String title, String message) {
+    std::vector<uint8_t> indices;
+    indices.reserve(accounts.size());
+    for (uint8_t i = 0; i < accounts.size(); ++i) indices.push_back(i);
+    sendNotification(title, message, indices);
 }
