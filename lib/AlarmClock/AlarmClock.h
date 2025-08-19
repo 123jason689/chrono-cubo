@@ -19,11 +19,12 @@ private:
     bool alarmEnabled;
     int alarmHour;
     int alarmMinute;
+    int alarmSoundTrack;
     unsigned long lastAlarmCheck;
     unsigned long alarmTriggerTime;
     
     // Setup state
-    bool editingHour; // true = editing hour, false = editing minute
+    int setupState; // 0 for hour, 1 for minute, 2 for sound
     
     // Display variables
     unsigned long lastDisplayUpdate;

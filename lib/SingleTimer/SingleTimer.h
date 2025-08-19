@@ -19,7 +19,8 @@ private:
     // Setup state
     int setupMinutes;
     int setupSeconds;
-    bool editingMinutes; // true = editing minutes, false = editing seconds
+    int setupSoundTrack;
+    int setupState; // 0 for minutes, 1 for seconds, 2 for sound
     
     // Display variables
     unsigned long lastDisplayUpdate;
