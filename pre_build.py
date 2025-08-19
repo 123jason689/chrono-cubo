@@ -30,7 +30,11 @@ def generate_config_h():
         'POT_SENSITIVITY': '3',
         'MOVE_DELAY': '150',
         'SLEEP_DURATION_SECONDS': '300',
-        'WIFI_TIMEOUT_MS': '15000'
+        'WIFI_TIMEOUT_MS': '15000',
+        # Audio and Notification
+        'DFPLAYER_TX_PIN': '10',
+        'DFPLAYER_RX_PIN': '7',
+        'LED_PIN': '4'
     }
     
     # Read .env.local if it exists
@@ -85,6 +89,11 @@ def generate_config_h():
 #define LEFT_CHAR 128
 #define RIGHT_CHAR 129
 #define SPACE_CHAR 130
+
+// Audio and Notification Pins
+#define DFPLAYER_TX_PIN ''' + config_values['DFPLAYER_TX_PIN'] + '''
+#define DFPLAYER_RX_PIN ''' + config_values['DFPLAYER_RX_PIN'] + '''
+#define LED_PIN ''' + config_values['LED_PIN'] + '''
 
 #endif // CONFIG_H
 '''
