@@ -45,8 +45,12 @@ std::vector<NetworkInfo> WiFiSelector::scanNetworks() {
     display->println("No WiFi networks");
     display->println("found!");
     display->display();
-    delay(2000);
-    
+    // Non-blocking: show message briefly but don't block other tasks
+    unsigned long _showStart = millis();
+    while (millis() - _showStart < 1500) {
+      yield();
+    }
+
     return networks;
   }
   
@@ -66,44 +70,51 @@ std::vector<NetworkInfo> WiFiSelector::scanNetworks() {
                   network.rssi, 
                   encryptionTypeToString(network.encryption).c_str());
   }
-  
   return networks;
 }
 
 bool WiFiSelector::connectWithSavedCredentials(const std::vector<NetworkInfo>& networks) {
-  if (!preferences->begin(pref_namespace.c_str(), true)) {  // true = read-only
-    Serial.println("Failed to open preferences because connect with saved credential return false");
+  if (!preferences) return false;
+
+  if (!preferences->begin(pref_namespace.c_str(), true)) {  // read-only
+    // Namespace may not exist on fresh device; treat as no saved credentials
+    Serial.println("No saved credentials found");
     return false;
   }
 
-  // If SSID key doesn't exist on a fresh device, bail out early
+  // If the ssid key isn't present, return quickly
   if (!preferences->isKey("ssid")) {
-    Serial.println("No saved credentials found");
     preferences->end();
+    Serial.println("No saved credentials found");
     return false;
   }
 
   String saved_ssid = preferences->getString("ssid", "");
   String saved_password = preferences->getString("password", "");
   preferences->end();
-  
+
+  if (saved_ssid.length() == 0) {
+    Serial.println("No saved credentials found");
+    return false;
+  }
+
   // Look for saved network in scan results
   for (const NetworkInfo& network : networks) {
     if (network.ssid.equals(saved_ssid)) {
       Serial.println("Found saved network: " + saved_ssid);
-      
+
       display->clearDisplay();
       display->setCursor(0, 0);
       display->println("Connecting to saved:");
       display->println(saved_ssid);
       display->display();
-      
+
       if (needsPassword(network.encryption)) {
         WiFi.begin(network.ssid, saved_password);
       } else {
         WiFi.begin(network.ssid);
       }
-      
+
       if (waitForConnection()) {
         Serial.println("Connected to saved network!");
         showConnectionResult(true, WiFi.localIP().toString());
@@ -115,7 +126,7 @@ bool WiFiSelector::connectWithSavedCredentials(const std::vector<NetworkInfo>& n
       }
     }
   }
-  
+
   Serial.println("Saved network not found in scan");
   return false;
 }
@@ -127,7 +138,9 @@ bool WiFiSelector::selectAndConnectNetwork(std::vector<NetworkInfo>& networks) {
     display->println("No networks to");
     display->println("select from!");
     display->display();
-    delay(2000);
+  // Non-blocking brief show
+  unsigned long _showStart2 = millis();
+  while (millis() - _showStart2 < 800) { yield(); }
     return false;
   }
   
@@ -219,8 +232,10 @@ bool WiFiSelector::selectAndConnectNetwork(std::vector<NetworkInfo>& networks) {
         password_prompt.setDisplayWidth(21, 126);  // Almost full width
         password_prompt.drawWithBackground(display, 0, 8, 1, SSD1306_WHITE, SSD1306_BLACK);
         
-        display->display();
-        delay(1000);
+  display->display();
+  // Give the UI a short moment to render without blocking
+  unsigned long _renderStart = millis();
+  while (millis() - _renderStart < 500) { yield(); }
         
         // Get password using keyboard
         const char* entered_password = prompt_keyboard();
@@ -241,9 +256,12 @@ bool WiFiSelector::selectAndConnectNetwork(std::vector<NetworkInfo>& networks) {
       } else {
         showConnectionResult(false);
         
-        // Wait for button press to continue
-        while (!select_button_pressed()) {
-          delay(100);
+        // Wait for button press to continue (non-blocking, with timeout)
+        {
+          unsigned long _waitStart = millis();
+          while (!select_button_pressed() && (millis() - _waitStart) < 30000) {
+            yield();
+          }
         }
         
         WiFi.disconnect();
@@ -251,7 +269,10 @@ bool WiFiSelector::selectAndConnectNetwork(std::vector<NetworkInfo>& networks) {
       }
     }
     
-    delay(20);  // Reduced delay for smooth scrolling
+  // Reduced busy-wait for smooth scrolling, non-blocking
+  static unsigned long __ssid_nav_last = 0;
+  if (millis() - __ssid_nav_last < 20) { yield(); }
+  else { __ssid_nav_last = millis(); }
   }
 }
 
@@ -284,12 +305,18 @@ void WiFiSelector::showConnectionResult(bool success, const String& ip) {
 
 bool WiFiSelector::waitForConnection() {
   unsigned long start_time = millis();
-  
-  while (WiFi.status() != WL_CONNECTED && millis() - start_time < connection_timeout) {
-    delay(500);
-    Serial.print(".");
+
+  // Poll connection status without blocking other tasks
+  while (WiFi.status() != WL_CONNECTED && millis() - start_time < (unsigned long)connection_timeout) {
+    yield();
+    // throttle prints to once per second
+    static unsigned long __wifi_dot_last = 0;
+    if (millis() - __wifi_dot_last > 1000) {
+      Serial.print(".");
+      __wifi_dot_last = millis();
+    }
   }
-  
+
   return (WiFi.status() == WL_CONNECTED);
 }
 

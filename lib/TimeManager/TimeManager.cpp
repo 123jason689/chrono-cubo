@@ -1,5 +1,6 @@
 #include "TimeManager.h"
 #include "configs.h"
+#include <Preferences.h>
 
 TimeManager::TimeManager(RTC_DS3231* rtcInstance, Adafruit_SSD1306* displayInstance) 
     : rtc(rtcInstance), display(displayInstance), timeSynced(false), lastSyncTime(0) {
@@ -19,9 +20,15 @@ bool TimeManager::initialize() {
         rtc->adjust(DateTime(F(__DATE__), F(__TIME__)));
     }
     
-    // Configure NTP
+    // Configure NTP and timezone. Load saved GMT offset from Preferences if available
+    int gmt_offset = 0;
+    Preferences p;
+    if (p.begin("storage", true, "nvs")) {
+        if (p.isKey("gmt_offset")) gmt_offset = p.getInt("gmt_offset", 0);
+        p.end();
+    }
     configTime(0, 0, ntpServer);
-    setTimezone(0); // Default to GMT, can be changed later
+    setTimezone(gmt_offset); // Apply stored or default GMT offset
     
     return true;
 }
@@ -52,20 +59,11 @@ bool TimeManager::syncTime() {
 }
 
 bool TimeManager::syncWithNTP() {
-    // Wait for NTP time to be set
-    time_t now = 0;
-    int attempts = 0;
-    const int maxAttempts = 10;
-    
-    while (now < 24 * 3600 && attempts < maxAttempts) {
-        Serial.print("Attempting NTP sync... ");
-        now = time(nullptr);
-        attempts++;
-        delay(1000);
-    }
-    
+    // Quick check for NTP time; non-blocking: return immediately if not available
+    time_t now = time(nullptr);
     if (now < 24 * 3600) {
-        return false; // Failed to get valid time
+        // Not yet set by NTP
+        return false;
     }
     
     // Convert to DateTime and set RTC

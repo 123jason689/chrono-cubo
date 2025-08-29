@@ -26,6 +26,9 @@ private:
     // Display variables
     unsigned long lastDisplayUpdate;
     const unsigned long displayUpdateInterval = 100; // Update display every 100ms
+    // Phase transition (non-blocking)
+    bool inPhaseTransition = false;
+    unsigned long transitionStartTime = 0;
     
     // Internal methods
     void drawTimerSelectionScreen();

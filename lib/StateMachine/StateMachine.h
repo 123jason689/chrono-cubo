@@ -29,6 +29,7 @@ enum AppState {
     STATE_TIME_DISPLAY,
     STATE_SETTINGS_MENU,
     STATE_SETTINGS_VOLUME,
+    STATE_SETTINGS_TIMEZONE,
     STATE_ALERTZY_KEY_SETUP,
     STATE_SETTINGS_TIMERS_MENU,
     STATE_SETTINGS_ALERTS_MENU,
@@ -80,6 +81,7 @@ private:
     void handleAlarmSetup();
     void handleAlarmRunning();
     void handleSettings();
+    void handleSettingsTimeZone();
     void handleTimeDisplay();
     
     void drawMainMenu();

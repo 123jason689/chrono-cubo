@@ -153,13 +153,20 @@ void StateMachine::drawMenuItem(int index, bool selected) {
 
 void StateMachine::handleSingleTimerSetup() {
     if (!singleTimerModule || !display) return;
-    // Delegate drawing to SingleTimer
+    // Delegate drawing and input handling to SingleTimer module
     singleTimerModule->drawCurrentScreen();
+    // Input handling is expected to be called from here by design
+    singleTimerModule->handleSetupInput();
 }
 
 void StateMachine::handleSingleTimerRunning() {
     if (!singleTimerModule || !display) return;
     singleTimerModule->drawCurrentScreen();
+    singleTimerModule->updateTimer();
+    if (singleTimerModule->isTimerFinished()) {
+        // Transition to finished state
+        transitionTo(STATE_SINGLE_TIMER_FINISHED);
+    }
 }
 
 void StateMachine::handleSingleTimerFinished() {
@@ -170,11 +177,18 @@ void StateMachine::handleSingleTimerFinished() {
 void StateMachine::handleMultiTimerSelect() {
     if (!multiTimerModule || !display) return;
     multiTimerModule->drawCurrentScreen();
+    multiTimerModule->handleTimerSelectionInput();
 }
 
 void StateMachine::handleMultiTimerRunning() {
     if (!multiTimerModule || !display) return;
+    // Non-blocking update
+    multiTimerModule->updateRoutine();
     multiTimerModule->drawCurrentScreen();
+    if (multiTimerModule->isRoutineFinished()) {
+        transitionTo(STATE_MULTI_TIMER_FINISHED);
+    }
+
 }
 
 void StateMachine::handleMultiTimerFinished() {
@@ -210,6 +224,50 @@ void StateMachine::handleSettings() {
 void StateMachine::handleTimeDisplay() {
     if (!timeManagerModule || !display) return;
     timeManagerModule->displayCurrentTime();
+}
+
+void StateMachine::handleSettingsTimeZone() {
+    if (!timeManagerModule || !display) return;
+    static bool drawn = false;
+    static int tz = 0;
+    if (previousState != STATE_SETTINGS_TIMEZONE) { drawn = false; }
+
+    auto draw = [&]() {
+        display->clearDisplay();
+        display->setTextSize(1);
+        display->setTextColor(SSD1306_WHITE);
+        display->setCursor(0, 0);
+        display->println("Set Timezone");
+        display->println("============");
+        display->setCursor(0, 24);
+        display->printf("GMT%+d\n", tz);
+        display->setCursor(0, 56);
+        display->print("X:Adj Btn:Save");
+        display->display();
+    };
+
+    if (!drawn) { drawn = true; /* read current from timeManager if available (not exposed) */ }
+
+    if (can_move()) {
+        int x = get_x_movement();
+        if (x != 0) {
+            tz += (x == 1) ? 1 : -1;
+            if (tz < -12) tz = -12;
+            if (tz > 14) tz = 14;
+            timeManagerModule->setTimezone(tz);
+            draw();
+        }
+    }
+
+    if (select_button_pressed()) {
+        // Save to preferences
+        Preferences p;
+        if (p.begin("storage", false, "nvs")) {
+            p.putInt("gmt_offset", tz);
+            p.end();
+        }
+        transitionTo(STATE_SETTINGS_MENU);
+    }
 }
 
 void StateMachine::setState(AppState newState) {

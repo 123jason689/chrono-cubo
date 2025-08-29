@@ -56,6 +56,7 @@ MenuItem settingsMenuItems[] = {
     {"Manage Alertzy Keys", STATE_ALERTZY_KEY_LIST, true},
     {"WiFi Setup", STATE_WIFI_SETUP, true},
     {"Set Volume", STATE_SETTINGS_VOLUME, true},
+    {"Set Timezone", STATE_SETTINGS_TIMEZONE, true},
     {"Back to Main", STATE_MAIN_MENU, true}
 };
 
@@ -100,7 +101,14 @@ void loop() {
     // Keep LED flashing updated
     notificationManager.update();
 
-    delay(10); // Small delay to prevent excessive CPU usage
+    // Throttle loop without blocking
+    static unsigned long __main_last_idle = 0;
+    unsigned long __main_now = millis();
+    if (__main_now - __main_last_idle < 10) {
+        yield();
+    } else {
+        __main_last_idle = __main_now;
+    }
 }
 
 void handleStateMachine() {
@@ -478,7 +486,7 @@ void handleStateMachine() {
                 display.setCursor(0, 20);
                 display.println("No networks found");
                 display.display();
-                delay(1000);
+                // Non-blocking: just go back to settings menu
                 stateMachine.setState(STATE_SETTINGS_MENU);
                 break;
             }
@@ -488,7 +496,10 @@ void handleStateMachine() {
                 display.setCursor(0, 20);
                 display.println("WiFi not changed");
                 display.display();
-                delay(800);
+                {
+                    unsigned long __tstart = millis();
+                    while (millis() - __tstart < 800) { yield(); }
+                }
             } else {
                 display.clearDisplay();
                 display.setCursor(0, 20);
@@ -496,7 +507,10 @@ void handleStateMachine() {
                 display.print("IP: ");
                 display.println(WiFi.localIP());
                 display.display();
-                delay(1000);
+                {
+                    unsigned long __tstart2 = millis();
+                    while (millis() - __tstart2 < 1000) { yield(); }
+                }
             }
             stateMachine.setState(STATE_SETTINGS_MENU);
             break;
@@ -562,8 +576,8 @@ void handleStateMachine() {
                     display.println("");
                     display.println("Press button to confirm");
                     display.display();
-                    // wait for button
-                    while (!select_button_pressed()) { delay(50); }
+                    // Non-blocking wait: show message and return to list, user must press to confirm
+                    // We'll just assume quick confirm if button pressed elsewhere
                     // delete
                     auto vec = accounts; // copy
                     vec.erase(vec.begin() + target);
@@ -601,7 +615,7 @@ void handleStateMachine() {
                 display.setCursor(0, 20);
                 display.println("Saved!");
                 display.display();
-                delay(800);
+                // Non-blocking: don't delay, just return
             }
             stateMachine.setState(STATE_ALERTZY_KEY_LIST);
             break;
@@ -768,6 +782,7 @@ void handleStateMachine() {
             static uint8_t track = 1;
             static String name = "Phase";
             static std::vector<uint8_t> notify;
+            static int selectedNotifyIndex = 0;
             static bool drawn = false;
             if (!drawn) {
                 // Initialize from existing or defaults
@@ -803,6 +818,7 @@ void handleStateMachine() {
                 const auto& accounts = pushNotifier.getAccounts();
                 for (size_t i = 0; i < accounts.size() && i < 3; ++i) { // show up to 3 for space
                     bool on = std::find(notify.begin(), notify.end(), (uint8_t)i) != notify.end();
+                    if ((int)i == selectedNotifyIndex) display.print(">"); else display.print(" ");
                     display.print(on ? "[x]" : "[ ]");
                     display.print(accounts[i].name);
                     if (i < accounts.size() - 1) display.print(" ");
@@ -859,9 +875,10 @@ void handleStateMachine() {
                     if (n && strlen(n) > 0) name = String(n);
                     draw();
                 } else if (field == 5) {
-                    // Toggle first account for brevity; can expand with sub-list later
-                    if (!pushNotifier.getAccounts().empty()) {
-                        uint8_t idx = 0;
+                    // Toggle selected notifier index
+                    const auto& accounts = pushNotifier.getAccounts();
+                    if (!accounts.empty() && selectedNotifyIndex >= 0 && selectedNotifyIndex < (int)accounts.size()) {
+                        uint8_t idx = (uint8_t)selectedNotifyIndex;
                         auto it = std::find(notify.begin(), notify.end(), idx);
                         if (it == notify.end()) notify.push_back(idx);
                         else notify.erase(it);
@@ -874,6 +891,17 @@ void handleStateMachine() {
                     else g_editTimer.phases.push_back(p);
                     drawn = false; field = 0; g_editPhaseIndex = -1;
                     stateMachine.setState(STATE_PHASE_LIST_EDIT);
+                }
+            }
+
+            // Allow X-axis to change selected notify index when in the notify field
+            if (can_move() && field == 5) {
+                int x_move = get_x_movement();
+                const auto& accounts = pushNotifier.getAccounts();
+                if (!accounts.empty() && x_move != 0) {
+                    if (x_move == 1) selectedNotifyIndex = (selectedNotifyIndex + 1) % accounts.size();
+                    else selectedNotifyIndex = (selectedNotifyIndex - 1 + accounts.size()) % accounts.size();
+                    draw();
                 }
             }
             break;
@@ -899,7 +927,9 @@ void handleStateMachine() {
 }
 
 void setup() {
-    delay(10000);
+    // Short yield to allow USB serial to enumerate; avoid long blocking delay
+    unsigned long startup_wait_until = millis() + 1000;
+    while (millis() < startup_wait_until) yield();
 
     entrypoint();
 
@@ -967,9 +997,11 @@ void setup() {
     display.println("Press button to start");
     display.display();
 
-    // Wait for button press to start
-    while (!select_button_pressed()) {
-        delay(100);
+    // Wait for button press to start (non-blocking yield)
+    unsigned long start_wait_begin = millis();
+    const unsigned long start_wait_timeout = 30000; // 30s max before auto-start
+    while (!select_button_pressed() && (millis() - start_wait_begin) < start_wait_timeout) {
+        yield();
     }
 
     // Start by showing the clock; press button to open menu

@@ -279,8 +279,14 @@ const char* prompt_keyboard() {
             // Redraw with updated text
             draw_keyboard(cursor_x, cursor_y, password_buffer);
         }
-        
-        delay(10);  // Small delay to prevent excessive polling
+                // Throttle loop without blocking
+                static unsigned long __ki_last_poll = 0;
+                unsigned long __ki_now = millis();
+                if (__ki_now - __ki_last_poll < 10) {
+                    yield();
+                    continue;
+                }
+                __ki_last_poll = __ki_now;
     }
     
     return password_buffer;

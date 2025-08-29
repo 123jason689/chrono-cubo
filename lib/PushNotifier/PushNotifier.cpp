@@ -68,7 +68,9 @@ void PushNotifier::sendNotification(String title, String message, const std::vec
                   "&message=" + urlEncode(message);
 
     int httpCode = http.POST(body);
-    (void)httpCode;
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[PushNotifier] Failed to send notification, HTTP code: %d\n", httpCode);
+    }
     http.end();
 }
 

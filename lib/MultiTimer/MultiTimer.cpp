@@ -76,20 +76,31 @@ void MultiTimer::updateRoutine() {
             pushNotifier.sendNotification("Chrono-Cubo", String("Phase complete: ") + phase.name, phase.alertzy_key_indices);
         }
 
-        // Proceed to next phase or finish
+        // Proceed to next phase or finish (use non-blocking transition)
         if (currentPhaseIndex >= (int)currentTimer->phases.size() - 1) {
             isRunning = false;
             isFinished = true;
             drawFinishedScreen();
             return;
         } else {
+            // Start non-blocking transition
+            inPhaseTransition = true;
+            transitionStartTime = millis();
             drawPhaseTransitionScreen();
-            delay(2000);
-            advanceToNextPhase();
         }
     }
 
     unsigned long currentTime = millis();
+    // If we're in a phase transition, show the transition screen for 2 seconds then advance
+    if (inPhaseTransition) {
+        drawPhaseTransitionScreen();
+        if (millis() - transitionStartTime >= 2000) {
+            inPhaseTransition = false;
+            advanceToNextPhase();
+        }
+        return; // Don't update running screen while transitioning
+    }
+
     if (currentTime - lastDisplayUpdate >= displayUpdateInterval) {
         drawRunningScreen();
         lastDisplayUpdate = currentTime;
