@@ -15,10 +15,12 @@
 #include "SingleTimer.h"
 #include "MultiTimer.h"
 #include "AlarmClock.h"
+#include "DataModels.h"
 #include "NotificationManager.h"
 #include "PushNotifier.h"
 #include "StorageManager.h"
 #include "configs.h"
+#include <nvs_flash.h>
 
 // Global objects
 Preferences pref;
@@ -44,7 +46,7 @@ static int g_editPhaseIndex = -1;
 MenuItem mainMenuItems[] = {
     {"Single Timer", STATE_SINGLE_TIMER_SETUP, true},
     {"Multi-Phase Timer", STATE_MULTI_TIMER_SELECT, true},
-    {"Sleep Alarm", STATE_ALARM_SETUP, true},
+    {"Sleep Alarm", STATE_ALARM_LIST_MENU, true},
     {"Settings", STATE_SETTINGS_MENU, true},
     {"Time Display", STATE_TIME_DISPLAY, true}
 };
@@ -53,6 +55,7 @@ MenuItem settingsMenuItems[] = {
     {"Manage Timers", STATE_SETTINGS_TIMERS_MENU, true},
     {"Manage Alertzy Keys", STATE_ALERTZY_KEY_LIST, true},
     {"WiFi Setup", STATE_WIFI_SETUP, true},
+    {"Set Volume", STATE_SETTINGS_VOLUME, true},
     {"Back to Main", STATE_MAIN_MENU, true}
 };
 
@@ -60,6 +63,9 @@ MenuItem settingsMenuItems[] = {
 unsigned long globalmilisbuff_start;
 unsigned long globalmilisbuff_end;
 bool systemInitialized = false;
+// Alarm interrupt globals
+bool isAlarmInterruptActive = false;
+AppState preAlarmState = STATE_MAIN_MENU;
 
 // function declaration
 void entrypoint();
@@ -69,13 +75,23 @@ void handleStateMachine();
 void loop() {
     // Main loop - handle state machine and timer updates
     if (systemInitialized) {
+        // --- START NEW ALARM INTERRUPT LOGIC ---
+        if (alarmClock.isRinging && !isAlarmInterruptActive) {
+            isAlarmInterruptActive = true;
+            preAlarmState = stateMachine.getCurrentState(); // Save current state
+            stateMachine.setState(STATE_ALARM_TRIGGERED);
+            // Play alert at higher volume briefly
+            notificationManager.playAlert(alarmClock.getAlarmSoundTrack(), 25);
+        }
+        // --- END NEW ALARM INTERRUPT LOGIC ---
+
         handleStateMachine();
         
         // Update alarm clock (runs continuously)
         alarmClock.updateAlarm();
         
-        // Handle alarm acknowledgment
-        if (alarmClock.isAlarmTriggered() && select_button_pressed()) {
+        // Handle alarm acknowledgment (legacy single-check removed)
+        if (alarmClock.isRinging && select_button_pressed()) {
             alarmClock.acknowledgeAlarm();
             notificationManager.stopAlert();
         }
@@ -157,11 +173,22 @@ void handleStateMachine() {
             break;
             
         case STATE_ALARM_SETUP:
-            if (!alarmClock.isAlarmSet()) {
-                alarmClock.handleSetupInput();
-                if (select_button_pressed() && alarmClock.isSetupComplete()) {
-                    alarmClock.setAlarm(alarmClock.getAlarmHour(), alarmClock.getAlarmMinute());
-                    stateMachine.setState(STATE_MAIN_MENU);
+            // Use AlarmClock's setup temp values to create a new alarm
+            alarmClock.handleSetupInput();
+            if (select_button_pressed()) {
+                // play UI click
+                notificationManager.playAdvert(1);
+                if (alarmClock.isSetupComplete()) {
+                    Alarm a;
+                    a.hour = (uint8_t)alarmClock.getSetupHour();
+                    a.minute = (uint8_t)alarmClock.getSetupMinute();
+                    a.enabled = true;
+                    a.sound_track = (uint8_t)alarmClock.getSetupSoundTrack();
+                    alarmClock.addAlarm(a);
+                    storageManager.saveAlarms(alarmClock.getAlarms());
+                    stateMachine.setState(STATE_ALARM_LIST_MENU);
+                } else {
+                    stateMachine.setState(STATE_ALARM_LIST_MENU);
                 }
             }
             break;
@@ -183,6 +210,164 @@ void handleStateMachine() {
             }
             break;
 
+        case STATE_ALARM_LIST_MENU: {
+            static int sel = 0; static bool drawn = false;
+            if (previousState != STATE_ALARM_LIST_MENU) { sel = 0; drawn = false; }
+
+            auto drawList = [&]() {
+                const auto& alarms = alarmClock.getAlarms();
+                display.clearDisplay();
+                display.setTextSize(1);
+                display.setTextColor(SSD1306_WHITE);
+                display.setCursor(0, 0);
+                display.println("Alarms");
+                display.println("======");
+                int total = (int)alarms.size() + 3; // +Add, Remove, <Back
+                for (int i = 0; i < total && (16 + i * 10) <= 54; ++i) {
+                    int y = 16 + i * 10;
+                    bool isSel = (i == sel);
+                    if (isSel) { display.fillRect(0, y - 1, SCREEN_WIDTH, 10, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK); }
+                    else { display.setTextColor(SSD1306_WHITE); }
+                    display.setCursor(2, y);
+                    if (i == 0) display.print("+ Add New");
+                    else if (i == total - 2) display.print("Remove Alarm");
+                    else if (i == total - 1) display.print("< Back");
+                    else {
+                        int idx = i - 1;
+                        char buf[8]; sprintf(buf, "%02d:%02d", alarms[idx].hour, alarms[idx].minute);
+                        display.print(buf);
+                        display.print(alarms[idx].enabled ? " *" : "");
+                    }
+                }
+                display.setCursor(0, 56);
+                display.print("Y:Move Btn:Select");
+                display.display();
+            };
+
+            if (!drawn) { drawList(); drawn = true; }
+            if (can_move()) {
+                int y_move = get_y_movement();
+                int maxIndex = (int)alarmClock.getAlarms().size() + 2;
+                if (y_move == -1) { sel = (sel > 0) ? sel - 1 : maxIndex; drawList(); }
+                if (y_move == 1)  { sel = (sel < maxIndex) ? sel + 1 : 0; drawList(); }
+            }
+
+            if (select_button_pressed()) {
+                notificationManager.playAdvert(1);
+                int total = (int)alarmClock.getAlarms().size() + 3;
+                if (sel == 0) {
+                    // Add new -> go to setup
+                    alarmClock.startSetup();
+                    stateMachine.setState(STATE_ALARM_SETUP);
+                } else if (sel == total - 2) {
+                    // Go to remove menu
+                    stateMachine.setState(STATE_ALARM_REMOVE_MENU);
+                } else if (sel == total - 1) {
+                    stateMachine.setState(STATE_MAIN_MENU);
+                } else {
+                    // Toggle enable/disable the selected alarm
+                    int idx = sel - 1;
+                    auto alarms = alarmClock.getAlarms();
+                    if (idx >= 0 && idx < (int)alarms.size()) {
+                        alarms[idx].enabled = !alarms[idx].enabled;
+                        // persist
+                        storageManager.saveAlarms(alarms);
+                        alarmClock.loadAlarms(storageManager);
+                    }
+                    drawn = false;
+                }
+            }
+            break;
+        }
+
+        case STATE_ALARM_REMOVE_MENU: {
+            static int sel = 0; static bool drawn = false;
+            if (previousState != STATE_ALARM_REMOVE_MENU) { sel = 0; drawn = false; }
+
+            auto drawRemove = [&]() {
+                const auto& alarms = alarmClock.getAlarms();
+                display.clearDisplay();
+                display.setTextSize(1);
+                display.setTextColor(SSD1306_WHITE);
+                display.setCursor(0, 0);
+                display.println("Remove Alarm");
+                display.println("============");
+                int total = (int)alarms.size() + 1; // <Back
+                for (int i = 0; i < total && (16 + i * 10) <= 54; ++i) {
+                    int y = 16 + i * 10;
+                    bool isSel = (i == sel);
+                    if (isSel) { display.fillRect(0, y - 1, SCREEN_WIDTH, 10, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK); }
+                    else { display.setTextColor(SSD1306_WHITE); }
+                    display.setCursor(2, y);
+                    if (i == total - 1) display.print("< Back");
+                    else {
+                        int idx = i;
+                        char buf[8]; sprintf(buf, "%02d:%02d", alarms[idx].hour, alarms[idx].minute);
+                        display.print(buf);
+                    }
+                }
+                display.setCursor(0, 56);
+                display.print("Y:Move Btn:Delete");
+                display.display();
+            };
+
+            if (!drawn) { drawRemove(); drawn = true; }
+            if (can_move()) {
+                int y_move = get_y_movement();
+                int maxIndex = (int)alarmClock.getAlarms().size();
+                if (y_move == -1) { sel = (sel > 0) ? sel - 1 : maxIndex; drawRemove(); }
+                if (y_move == 1)  { sel = (sel < maxIndex) ? sel + 1 : 0; drawRemove(); }
+            }
+
+            if (select_button_pressed()) {
+                // delete selected
+                notificationManager.playAdvert(1);
+                if (sel == (int)alarmClock.getAlarms().size()) {
+                    stateMachine.setState(STATE_ALARM_LIST_MENU);
+                } else {
+                    alarmClock.removeAlarm(sel);
+                    storageManager.saveAlarms(alarmClock.getAlarms());
+                    stateMachine.setState(STATE_ALARM_LIST_MENU);
+                }
+            }
+            break;
+        }
+
+        case STATE_ALARM_TRIGGERED: {
+            // Prominent wake-up screen; will repeat alert until acknowledged
+            display.clearDisplay();
+            display.setTextSize(2);
+            display.setTextColor(SSD1306_WHITE);
+            display.setCursor(8, 10);
+            display.println("WAKE UP!");
+            display.setTextSize(1);
+            display.setCursor(8, 44);
+            display.println("Btn: Stop Alarm");
+            display.display();
+
+            // If no longer ringing, return to previous state
+            if (!alarmClock.isRinging) {
+                isAlarmInterruptActive = false;
+                stateMachine.setState(preAlarmState);
+                break;
+            }
+
+            // Ensure alert repeats if it finishes
+            if (!notificationManager.isAlerting()) {
+                notificationManager.playAlert(alarmClock.getAlarmSoundTrack());
+            }
+
+            // Ack
+            if (select_button_pressed()) {
+                notificationManager.playAdvert(1);
+                isAlarmInterruptActive = false;
+                alarmClock.acknowledgeAlarm();
+                notificationManager.stopAlert();
+                stateMachine.setState(preAlarmState);
+            }
+            break;
+        }
+
         case STATE_SETTINGS_MENU: {
             // Simple settings menu UI and navigation
             static int settingsSelected = 0;
@@ -200,7 +385,8 @@ void handleStateMachine() {
                 display.println("Settings");
                 display.println("========");
 
-                for (int i = 0; i < 4; i++) {
+                int settingsCount = sizeof(settingsMenuItems) / sizeof(MenuItem);
+                for (int i = 0; i < settingsCount; i++) {
                     int y = 16 + i * 10;
                     if (i == settingsSelected) {
                         display.fillRect(0, y - 1, SCREEN_WIDTH, 10, SSD1306_WHITE);
@@ -209,10 +395,7 @@ void handleStateMachine() {
                         display.setTextColor(SSD1306_WHITE);
                     }
                     display.setCursor(2, y);
-                    if (i == 0) display.print("Manage Timers");
-                    if (i == 1) display.print("Manage Alertzy Keys");
-                    if (i == 2) display.print("WiFi Setup");
-                    if (i == 3) display.print("Back to Main");
+                    display.print(settingsMenuItems[i].name);
                 }
 
                 display.setTextColor(SSD1306_WHITE);
@@ -225,15 +408,57 @@ void handleStateMachine() {
 
             if (can_move()) {
                 int y_move = get_y_movement();
-                if (y_move == -1) { settingsSelected = (settingsSelected > 0) ? settingsSelected - 1 : 3; drawSettingsMenu(); }
-                if (y_move == 1)  { settingsSelected = (settingsSelected < 3) ? settingsSelected + 1 : 0; drawSettingsMenu(); }
+                int settingsCount = sizeof(settingsMenuItems) / sizeof(MenuItem);
+                if (y_move == -1) { settingsSelected = (settingsSelected > 0) ? settingsSelected - 1 : settingsCount - 1; drawSettingsMenu(); }
+                if (y_move == 1)  { settingsSelected = (settingsSelected < settingsCount - 1) ? settingsSelected + 1 : 0; drawSettingsMenu(); }
             }
 
             if (select_button_pressed()) {
-                if (settingsSelected == 0) stateMachine.setState(STATE_SETTINGS_TIMERS_MENU);
-                if (settingsSelected == 1) stateMachine.setState(STATE_ALERTZY_KEY_LIST);
-                if (settingsSelected == 2) stateMachine.setState(STATE_WIFI_SETUP);
-                if (settingsSelected == 3) stateMachine.setState(STATE_MAIN_MENU);
+                int settingsCount = sizeof(settingsMenuItems) / sizeof(MenuItem);
+                if (settingsSelected >= 0 && settingsSelected < settingsCount) {
+                    stateMachine.setState(settingsMenuItems[settingsSelected].targetState);
+                }
+            }
+            break;
+        }
+        case STATE_SETTINGS_VOLUME: {
+            static bool drawn = false;
+            static int vol = 0;
+            if (previousState != STATE_SETTINGS_VOLUME) { vol = notificationManager.getVolume(); drawn = false; }
+
+            auto drawVol = [&]() {
+                display.clearDisplay();
+                display.setTextSize(1);
+                display.setTextColor(SSD1306_WHITE);
+                display.setCursor(0, 0);
+                display.println("Set Volume");
+                display.println("==========");
+                display.setCursor(0, 24);
+                display.print("Volume: "); display.println(vol);
+                // Draw a simple bar
+                int barX = 0; int barY = 40; int barW = SCREEN_WIDTH - 4; int barH = 8;
+                int filled = (vol * barW) / 30;
+                display.drawRect(barX, barY, barW, barH, SSD1306_WHITE);
+                if (filled > 0) display.fillRect(barX + 1, barY + 1, filled - 1, barH - 2, SSD1306_WHITE);
+                display.setCursor(0, 56);
+                display.print("X:Adj Btn:Back");
+                display.display();
+            };
+
+            if (!drawn) { drawVol(); drawn = true; }
+
+            if (can_move()) {
+                int x_move = get_x_movement();
+                if (x_move != 0) {
+                    vol = vol + (x_move == 1 ? 1 : -1);
+                    if (vol < 0) vol = 0; if (vol > 30) vol = 30;
+                    notificationManager.setVolume(vol);
+                    drawVol();
+                }
+            }
+
+            if (select_button_pressed()) {
+                stateMachine.setState(STATE_SETTINGS_MENU);
             }
             break;
         }
@@ -674,8 +899,10 @@ void handleStateMachine() {
 }
 
 void setup() {
-  entrypoint();
-  
+    delay(5000);
+
+    entrypoint();
+
     // Initialize system components
     initializeSystem();
     
@@ -764,23 +991,37 @@ void initializeSystem() {
 }
 
 void entrypoint(){
-  Serial.begin(115200);
-  WiFi.mode(WIFI_STA);
-  
-  // Initialize I2C with custom pins
-  Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-  
-  // Initialize display
-  if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;); // Don't proceed, loop forever
-  }
-  
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0,0);
+    Serial.begin(115200);
+
+    // Initialize NVS (required by Preferences). If partition needs erase, do that and retry.
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated/changed — erase and re-init
+        nvs_flash_erase();
+        nvs_err = nvs_flash_init();
+    }
+    if (nvs_err != ESP_OK) {
+        delay(10000);
+        Serial.printf("[setup] NVS init failed: 0x%08x\n", nvs_err);
+        // Continue but Preferences calls will likely fail until NVS is fixed
+    }
+
+    WiFi.mode(WIFI_STA);
+    
+    // Initialize I2C with custom pins
+    Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+    
+    // Initialize display
+    if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
+        Serial.println(F("SSD1306 allocation failed"));
+        for(;;); // Don't proceed, loop forever
+    }
+    
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0,0);
     display.println("Chrono-Cubo");
-  display.println("Initializing...");
-  display.display();
+    display.println("Initializing...");
+    display.display();
 }

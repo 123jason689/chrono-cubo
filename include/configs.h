@@ -39,8 +39,8 @@
 #define SPACE_CHAR 130
 
 // Audio and Notification Pins
-#define DFPLAYER_TX_PIN 10
-#define DFPLAYER_RX_PIN 7
+#define DFPLAYER_TX_PIN 20
+#define DFPLAYER_RX_PIN 21
 #define LED_PIN 4
 
 #endif // CONFIG_H

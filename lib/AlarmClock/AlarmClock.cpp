@@ -1,4 +1,5 @@
 #include "AlarmClock.h"
+#include "StorageManager.h"
 #include "configs.h"
 #include "NotificationManager.h"
 #include "PushNotifier.h"
@@ -6,17 +7,15 @@
 extern NotificationManager notificationManager;
 
 AlarmClock::AlarmClock(Adafruit_SSD1306* displayInstance, RTC_DS3231* rtcInstance, PushNotifier* notifier) 
-    : display(displayInstance), rtc(rtcInstance), pushNotifier(notifier), alarmSet(false), alarmTriggered(false), alarmEnabled(false),
-      alarmHour(7), alarmMinute(30), alarmSoundTrack(3), lastAlarmCheck(0), alarmTriggerTime(0), setupState(0), lastDisplayUpdate(0) {
+    : display(displayInstance), rtc(rtcInstance), pushNotifier(notifier), lastAlarmCheck(0), alarmTriggerTime(0), currentAlarmIndex(-1), isRinging(false), lastDisplayUpdate(0) {
 }
 
 void AlarmClock::startSetup() {
-    alarmHour = 7;
-    alarmMinute = 30;
-    alarmSoundTrack = 3;
     setupState = 0;
-    alarmSet = false;
-    alarmTriggered = false;
+    tempHour = 7;
+    tempMinute = 30;
+    tempSoundTrack = 3;
+    // Default no-op; use addAlarm to create alarms
     drawSetupScreen();
 }
 
@@ -40,16 +39,16 @@ void AlarmClock::handleSetupInput() {
         if (x_move != 0) {
             switch (setupState) {
                 case 0: // hour
-                    if (x_move == 1) alarmHour = (alarmHour < 23) ? alarmHour + 1 : 0;
-                    else alarmHour = (alarmHour > 0) ? alarmHour - 1 : 23;
+                    if (x_move == 1) tempHour = (tempHour < 23) ? tempHour + 1 : 0;
+                    else tempHour = (tempHour > 0) ? tempHour - 1 : 23;
                     break;
                 case 1: // minute
-                    if (x_move == 1) alarmMinute = (alarmMinute < 59) ? alarmMinute + 1 : 0;
-                    else alarmMinute = (alarmMinute > 0) ? alarmMinute - 1 : 59;
+                    if (x_move == 1) tempMinute = (tempMinute < 59) ? tempMinute + 1 : 0;
+                    else tempMinute = (tempMinute > 0) ? tempMinute - 1 : 59;
                     break;
                 case 2: // sound
-                    if (x_move == 1) alarmSoundTrack = (alarmSoundTrack < 50) ? alarmSoundTrack + 1 : 1;
-                    else alarmSoundTrack = (alarmSoundTrack > 1) ? alarmSoundTrack - 1 : 50;
+                    if (x_move == 1) tempSoundTrack = (tempSoundTrack < 50) ? tempSoundTrack + 1 : 1;
+                    else tempSoundTrack = (tempSoundTrack > 1) ? tempSoundTrack - 1 : 50;
                     break;
             }
             drawSetupScreen();
@@ -61,46 +60,52 @@ bool AlarmClock::isSetupComplete() const {
     return true; // Always complete since we have default values
 }
 
-void AlarmClock::setAlarm(int hour, int minute) {
-    alarmHour = hour;
-    alarmMinute = minute;
-    alarmSet = true;
-    alarmEnabled = true;
-    alarmTriggered = false;
-    // Sound track is taken from current setup selection
-    Serial.print("Alarm set for: ");
-    Serial.print(hour);
-    Serial.print(":");
-    Serial.println(minute);
+void AlarmClock::loadAlarms(StorageManager& storage) {
+    alarms = storage.loadAlarms();
+}
+
+void AlarmClock::addAlarm(const Alarm& newAlarm) {
+    // Check duplicates
+    for (const auto& a : alarms) {
+        if (a.hour == newAlarm.hour && a.minute == newAlarm.minute) return;
+    }
+    alarms.push_back(newAlarm);
+}
+
+void AlarmClock::removeAlarm(int index) {
+    if (index >= 0 && index < (int)alarms.size()) alarms.erase(alarms.begin() + index);
+}
+
+const std::vector<Alarm>& AlarmClock::getAlarms() const {
+    return alarms;
 }
 
 void AlarmClock::enableAlarm(bool enable) {
-    alarmEnabled = enable;
-    if (!enable) {
-        alarmTriggered = false;
-    }
+    for (auto& a : alarms) a.enabled = enable;
 }
 
 void AlarmClock::disableAlarm() {
-    alarmEnabled = false;
-    alarmTriggered = false;
+    for (auto& a : alarms) a.enabled = false;
+    isRinging = false;
+    currentAlarmIndex = -1;
 }
 
 bool AlarmClock::isAlarmSet() const {
-    return alarmSet;
+    return !alarms.empty();
 }
 
 bool AlarmClock::isAlarmEnabled() const {
-    return alarmEnabled && alarmSet;
+    for (const auto& a : alarms) if (a.enabled) return true;
+    return false;
 }
 
 bool AlarmClock::isAlarmTriggered() const {
-    return alarmTriggered;
+    return isRinging;
 }
 
 void AlarmClock::updateAlarm() {
-    if (!alarmEnabled || !alarmSet) return;
-    
+    // Always check alarms if alarms exist
+    if (alarms.empty()) return;
     unsigned long currentTime = millis();
     
     // Check alarm time every second
@@ -121,33 +126,37 @@ void AlarmClock::checkAlarmTime() {
     
     DateTime now = rtc->now();
     
-    // Check if current time matches alarm time (within 1 second)
-    if (now.hour() == alarmHour && now.minute() == alarmMinute && now.second() == 0) {
-        if (!alarmTriggered) {
-            alarmTriggered = true;
+    // Iterate alarms and trigger when a matching enabled alarm is found at exact 0 seconds
+    for (size_t i = 0; i < alarms.size(); ++i) {
+        const Alarm& a = alarms[i];
+        if (!a.enabled) continue;
+        if (now.hour() == a.hour && now.minute() == a.minute && now.second() == 0) {
+            // Trigger the first matching alarm
+            isRinging = true;
+            currentAlarmIndex = (int)i;
             alarmTriggerTime = millis();
-            Serial.println("ALARM TRIGGERED!");
-            // Start audio/LED alert
-            notificationManager.playAlert(alarmSoundTrack, 25);
+            Serial.println("ALARM TRIGGERED (multi)!");
+            // Play alarm sound (use current volume)
+            notificationManager.playAlert(a.sound_track);
             // Push notification
-            if (pushNotifier) {
-                pushNotifier->sendAll("Chrono-Cubo Alarm", "Time to wake up!");
-            }
+            if (pushNotifier) pushNotifier->sendAll("Chrono-Cubo Alarm", "Time to wake up!");
             drawAlarmTriggeredScreen();
+            return;
         }
     }
 }
 
 void AlarmClock::acknowledgeAlarm() {
-    alarmTriggered = false;
+    isRinging = false;
+    currentAlarmIndex = -1;
     // Optionally disable alarm after acknowledgment
     // alarmEnabled = false;
 }
 
 void AlarmClock::drawCurrentScreen() {
-    if (alarmTriggered) {
+    if (isRinging) {
         drawAlarmTriggeredScreen();
-    } else if (alarmSet) {
+    } else if (!alarms.empty()) {
         drawAlarmStatusScreen();
     } else {
         drawSetupScreen();
@@ -175,13 +184,13 @@ void AlarmClock::drawSetupScreen() {
     // Time display
     display->setTextSize(2);
     display->setCursor(12, 36);
-    display->print(formatTime(alarmHour, alarmMinute));
+    display->print(formatTime(tempHour, tempMinute));
 
     // Sound display
     display->setTextSize(1);
     display->setCursor(0, 54);
     display->print("Sound: < Track ");
-    display->print(alarmSoundTrack);
+    display->print(tempSoundTrack);
     display->print(" >");
 
     // Active field indicator
@@ -213,34 +222,64 @@ void AlarmClock::drawAlarmStatusScreen() {
     sprintf(currentTimeStr, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
     display->println(currentTimeStr);
     
-    // Alarm time
+    // Next alarm time (find next enabled alarm)
     display->setCursor(0, 28);
-    display->print("Alarm: ");
-    display->print(formatTime(alarmHour, alarmMinute));
+    display->print("Next Alarm: ");
+    if (alarms.empty()) {
+        display->print("- none -");
+    } else {
+        // Find next alarm chronologically
+        int nowMinutes = now.hour() * 60 + now.minute();
+        int bestIdx = -1; int bestMinutes = 24*60;
+        for (size_t i = 0; i < alarms.size(); ++i) {
+            if (!alarms[i].enabled) continue;
+            int am = alarms[i].hour * 60 + alarms[i].minute;
+            int delta = am - nowMinutes;
+            if (delta < 0) delta += 24*60;
+            if (bestIdx == -1 || delta < bestMinutes) { bestMinutes = delta; bestIdx = (int)i; }
+        }
+        if (bestIdx == -1) {
+            display->print("- none -");
+        } else {
+            display->print(formatTime(alarms[bestIdx].hour, alarms[bestIdx].minute));
+        }
+    }
     
     // Status
     display->setCursor(0, 40);
-    if (alarmEnabled) {
+    if (isAlarmEnabled()) {
         display->print("Status: ENABLED");
     } else {
         display->print("Status: DISABLED");
     }
     
     // Time until alarm
-    int currentMinutes = now.hour() * 60 + now.minute();
-    int alarmMinutes = alarmHour * 60 + alarmMinute;
-    int minutesUntilAlarm = alarmMinutes - currentMinutes;
-    
-    if (minutesUntilAlarm < 0) {
-        minutesUntilAlarm += 24 * 60; // Next day
+    // Time until next alarm
+    if (alarms.empty()) {
+        display->setCursor(0, 52);
+        display->print("No alarms set");
+    } else {
+        int nowMinutes = now.hour() * 60 + now.minute();
+        int bestIdx = -1; int bestDelta = 24*60;
+        for (size_t i = 0; i < alarms.size(); ++i) {
+            if (!alarms[i].enabled) continue;
+            int am = alarms[i].hour * 60 + alarms[i].minute;
+            int delta = am - nowMinutes;
+            if (delta < 0) delta += 24*60;
+            if (bestIdx == -1 || delta < bestDelta) { bestDelta = delta; bestIdx = (int)i; }
+        }
+        if (bestIdx == -1) {
+            display->setCursor(0, 52);
+            display->print("No enabled alarms");
+        } else {
+            display->setCursor(0, 52);
+            display->print("Time until: ");
+            display->print(bestDelta / 60);
+            display->print("h ");
+            display->print(bestDelta % 60);
+            display->print("m");
+        }
     }
-    
-    display->setCursor(0, 52);
-    display->print("Time until: ");
-    display->print(minutesUntilAlarm / 60);
-    display->print("h ");
-    display->print(minutesUntilAlarm % 60);
-    display->print("m");
     
     display->display();
 }
@@ -270,7 +309,11 @@ void AlarmClock::drawAlarmTriggeredScreen() {
         display->setTextSize(1);
         display->setCursor(20, 40);
         display->print("Alarm: ");
-        display->println(formatTime(alarmHour, alarmMinute));
+        if (currentAlarmIndex >= 0 && currentAlarmIndex < (int)alarms.size()) {
+            display->println(formatTime(alarms[currentAlarmIndex].hour, alarms[currentAlarmIndex].minute));
+        } else {
+            display->println(formatTime(tempHour, tempMinute));
+        }
         
         display->setCursor(20, 50);
         display->println("Press button to stop");
@@ -286,25 +329,36 @@ String AlarmClock::formatTime(int hour, int minute) const {
 }
 
 void AlarmClock::reset() {
-    alarmSet = false;
-    alarmTriggered = false;
-    alarmEnabled = false;
-    alarmHour = 7;
-    alarmMinute = 30;
-    alarmSoundTrack = 3;
+    alarms.clear();
+    isRinging = false;
+    currentAlarmIndex = -1;
     setupState = 0;
     lastAlarmCheck = 0;
     alarmTriggerTime = 0;
 }
 
 int AlarmClock::getAlarmHour() const {
-    return alarmHour;
+    if (!alarms.empty()) return alarms[0].hour;
+    return tempHour;
 }
 
 int AlarmClock::getAlarmMinute() const {
-    return alarmMinute;
+    if (!alarms.empty()) return alarms[0].minute;
+    return tempMinute;
 }
 
 String AlarmClock::getAlarmTimeString() const {
-    return formatTime(alarmHour, alarmMinute);
+    if (!alarms.empty()) return formatTime(alarms[0].hour, alarms[0].minute);
+    return formatTime(tempHour, tempMinute);
 }
+
+int AlarmClock::getAlarmSoundTrack() const {
+    if (currentAlarmIndex >= 0 && currentAlarmIndex < (int)alarms.size()) return alarms[currentAlarmIndex].sound_track;
+    // Fallback to first alarm or temp
+    if (!alarms.empty()) return alarms[0].sound_track;
+    return tempSoundTrack;
+}
+
+int AlarmClock::getSetupHour() const { return tempHour; }
+int AlarmClock::getSetupMinute() const { return tempMinute; }
+int AlarmClock::getSetupSoundTrack() const { return tempSoundTrack; }

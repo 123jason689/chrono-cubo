@@ -24,4 +24,12 @@ struct CustomTimer {
 	std::vector<TimerPhase> phases;
 };
 
+// Simple alarm definition for clock
+struct Alarm {
+	uint8_t hour;
+	uint8_t minute;
+	bool enabled;
+	uint8_t sound_track;
+};
+
 #endif

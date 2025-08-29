@@ -6,6 +6,10 @@
 #include <RTClib.h>
 #include "KeyInput.h"
 #include "PushNotifier.h"
+#include "DataModels.h"
+
+// Forward declaration
+class StorageManager;
 
 class AlarmClock {
 private:
@@ -13,18 +17,18 @@ private:
     RTC_DS3231* rtc;
     PushNotifier* pushNotifier;
     
-    // Alarm state
-    bool alarmSet;
-    bool alarmTriggered;
-    bool alarmEnabled;
-    int alarmHour;
-    int alarmMinute;
-    int alarmSoundTrack;
+    // Alarms list
+    std::vector<Alarm> alarms;
     unsigned long lastAlarmCheck;
     unsigned long alarmTriggerTime;
+    int currentAlarmIndex;
     
     // Setup state
     int setupState; // 0 for hour, 1 for minute, 2 for sound
+    // Temporary setup values when creating a new alarm
+    int tempHour;
+    int tempMinute;
+    int tempSoundTrack;
     
     // Display variables
     unsigned long lastDisplayUpdate;
@@ -47,7 +51,15 @@ public:
     bool isSetupComplete() const;
     
     // Alarm management
-    void setAlarm(int hour, int minute);
+    // Load/save
+    void loadAlarms(StorageManager& storage);
+    void addAlarm(const Alarm& newAlarm);
+    void removeAlarm(int index);
+    const std::vector<Alarm>& getAlarms() const;
+
+    // Ringing status
+    bool isRinging;
+    // Legacy compatibility methods
     void enableAlarm(bool enable = true);
     void disableAlarm();
     bool isAlarmSet() const;
@@ -57,6 +69,9 @@ public:
     // Running methods
     void updateAlarm();
     void acknowledgeAlarm();
+
+    // Alarm sound info for currently ringing alarm
+    int getAlarmSoundTrack() const;
     
     // Display methods
     void drawCurrentScreen();
@@ -65,9 +80,15 @@ public:
     void reset();
     
     // Getters
+    // Return primary alarm info (first alarm) or setup temp if none
     int getAlarmHour() const;
     int getAlarmMinute() const;
     String getAlarmTimeString() const;
+
+    // Accessors for setup temporary values
+    int getSetupHour() const;
+    int getSetupMinute() const;
+    int getSetupSoundTrack() const;
 };
 
 #endif // ALARMCLOCK_H

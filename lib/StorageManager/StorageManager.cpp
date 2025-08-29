@@ -6,7 +6,7 @@ StorageManager::StorageManager(Preferences* prefs) : preferences(prefs) {}
 std::vector<AlertzyAccount> StorageManager::loadAlertzyAccounts() {
 	std::vector<AlertzyAccount> accounts;
 	if (!preferences) return accounts;
-	preferences->begin("storage", true);
+	preferences->begin("storage", true, "nvs");
 	String json = preferences->getString("alertzy_accounts", "");
 	preferences->end();
 	if (json.length() == 0) return accounts;
@@ -36,7 +36,7 @@ void StorageManager::saveAlertzyAccounts(const std::vector<AlertzyAccount>& acco
 	String json;
 	serializeJson(doc, json);
 	if (!preferences) return;
-	preferences->begin("storage", false);
+	preferences->begin("storage", false, "nvs");
 	preferences->putString("alertzy_accounts", json);
 	preferences->end();
 }
@@ -44,7 +44,7 @@ void StorageManager::saveAlertzyAccounts(const std::vector<AlertzyAccount>& acco
 std::vector<CustomTimer> StorageManager::loadCustomTimers() {
 	std::vector<CustomTimer> timers;
 	if (!preferences) return timers;
-	preferences->begin("storage", true);
+	preferences->begin("storage", true, "nvs");
 	String json = preferences->getString("custom_timers", "");
 	preferences->end();
 	if (json.length() == 0) return timers;
@@ -92,7 +92,49 @@ void StorageManager::saveCustomTimers(const std::vector<CustomTimer>& timers) {
 	String json;
 	serializeJson(doc, json);
 	if (!preferences) return;
-	preferences->begin("storage", false);
+	preferences->begin("storage", false, "nvs");
 	preferences->putString("custom_timers", json);
+	preferences->end();
+}
+
+std::vector<Alarm> StorageManager::loadAlarms() {
+	std::vector<Alarm> alarms;
+	if (!preferences) return alarms;
+	preferences->begin("storage", true, "nvs");
+	String json = preferences->getString("alarms", "");
+	preferences->end();
+	if (json.length() == 0) return alarms;
+
+	DynamicJsonDocument doc(1024);
+	auto err = deserializeJson(doc, json);
+	if (err) return alarms;
+	if (!doc.is<JsonArray>()) return alarms;
+
+	for (JsonVariant v : doc.as<JsonArray>()) {
+		Alarm a;
+		a.hour = v["hour"].as<uint8_t>();
+		a.minute = v["minute"].as<uint8_t>();
+		a.enabled = v["enabled"].as<bool>();
+		a.sound_track = v["sound_track"].as<uint8_t>();
+		alarms.push_back(a);
+	}
+	return alarms;
+}
+
+void StorageManager::saveAlarms(const std::vector<Alarm>& alarms) {
+	if (!preferences) return;
+	DynamicJsonDocument doc(1024);
+	JsonArray arr = doc.to<JsonArray>();
+	for (const auto& a : alarms) {
+		JsonObject o = arr.add<JsonObject>();
+		o["hour"] = a.hour;
+		o["minute"] = a.minute;
+		o["enabled"] = a.enabled;
+		o["sound_track"] = a.sound_track;
+	}
+	String json;
+	serializeJson(doc, json);
+	preferences->begin("storage", false, "nvs");
+	preferences->putString("alarms", json);
 	preferences->end();
 }

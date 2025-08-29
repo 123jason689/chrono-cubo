@@ -19,6 +19,10 @@ public:
 	// Custom Timer Management
 	std::vector<CustomTimer> loadCustomTimers();
 	void saveCustomTimers(const std::vector<CustomTimer>& timers);
+
+	// Alarm Management
+	std::vector<Alarm> loadAlarms();
+	void saveAlarms(const std::vector<Alarm>& alarms);
 };
 
 #endif

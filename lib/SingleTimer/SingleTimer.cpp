@@ -86,7 +86,7 @@ void SingleTimer::updateTimer() {
         isFinished = true;
         remainingTime = 0;
         // Trigger audio/LED alert
-        notificationManager.playAlert(setupSoundTrack, 25);
+        notificationManager.playAlert(setupSoundTrack);
         drawFinishedScreen();
         return;
     }

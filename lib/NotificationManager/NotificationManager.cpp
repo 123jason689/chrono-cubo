@@ -7,7 +7,7 @@
 static HardwareSerial DFSerial(1);
 
 NotificationManager::NotificationManager()
-    : isAlertActive(false), lastFlashTime(0), ledState(false) {}
+    : isAlertActive(false), lastFlashTime(0), ledState(false), currentVolume(20) {}
 
 void NotificationManager::begin() {
     // Initialize LED pin
@@ -26,21 +26,20 @@ void NotificationManager::begin() {
     }
 
     dfPlayer.setTimeOut(500);
-    dfPlayer.volume(20); // default volume
+    dfPlayer.volume(currentVolume); // default volume
     dfPlayer.EQ(DFPLAYER_EQ_NORMAL);
     Serial.println("[NotificationManager] DFPlayer ready.");
 }
 
-void NotificationManager::playAlert(int trackNumber, int volume) {
-    if (volume < 0) volume = 0;
-    if (volume > 30) volume = 30; // DFPlayer volume range 0-30
+void NotificationManager::playAlert(int trackNumber) {
 
     if (dfPlayer.available()) {
         // Drain any pending notifications
         while (dfPlayer.available()) { dfPlayer.readType(); }
     }
 
-    dfPlayer.volume(volume);
+    dfPlayer.volume(currentVolume);
+    
     // Plays /mp3/00XX.mp3 where XX matches trackNumber
     dfPlayer.playMp3Folder(trackNumber);
 
@@ -48,6 +47,13 @@ void NotificationManager::playAlert(int trackNumber, int volume) {
     lastFlashTime = millis();
     ledState = true;
     digitalWrite(LED_PIN, ledState ? HIGH : LOW);
+}
+
+void NotificationManager::playAlert(int trackNumber, int vol) {
+    if (vol < 0) vol = 0; if (vol > 30) vol = 30;
+    currentVolume = vol;
+    if (dfPlayer.available()) dfPlayer.volume(currentVolume);
+    playAlert(trackNumber);
 }
 
 void NotificationManager::stopAlert() {
@@ -68,4 +74,32 @@ void NotificationManager::update() {
         ledState = !ledState;
         digitalWrite(LED_PIN, ledState ? HIGH : LOW);
     }
+}
+
+void NotificationManager::setVolume(int vol) {
+    if (vol < 0) vol = 0;
+    if (vol > 30) vol = 30;
+    currentVolume = vol;
+    // Apply to DFPlayer if possible
+    if (dfPlayer.available()) dfPlayer.volume(currentVolume);
+}
+
+int NotificationManager::getVolume() const {
+    return currentVolume;
+}
+
+void NotificationManager::playAdvert(uint16_t trackNumber) {
+    // Use DFPlayer's advertisement/interrupt API which pauses current mp3 and plays advert
+    // Note: playAdvertisement is available in DFRobotDFPlayerMini library
+    if (dfPlayer.available()) {
+        // DFRobotDFPlayerMini provides `advertise()` to play short advert/notification clips
+        dfPlayer.advertise((uint8_t)trackNumber);
+    } else {
+        // Fallback: just play from mp3 folder
+        dfPlayer.playMp3Folder(trackNumber);
+    }
+}
+
+bool NotificationManager::isAlerting() const {
+    return isAlertActive;
 }

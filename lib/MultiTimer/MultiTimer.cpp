@@ -70,7 +70,7 @@ void MultiTimer::updateRoutine() {
         // End-of-phase alerts
         const TimerPhase& phase = currentTimer->phases[currentPhaseIndex];
         if (phase.sound_track > 0) {
-            notificationManager.playAlert(phase.sound_track, 25);
+            notificationManager.playAlert(phase.sound_track);
         }
         if (!phase.alertzy_key_indices.empty()) {
             pushNotifier.sendNotification("Chrono-Cubo", String("Phase complete: ") + phase.name, phase.alertzy_key_indices);
