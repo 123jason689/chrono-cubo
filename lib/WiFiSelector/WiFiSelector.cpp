@@ -7,6 +7,8 @@ WiFiSelector::WiFiSelector(Adafruit_SSD1306* disp, Preferences* pref, const Stri
   preferences = pref;
   pref_namespace = namespace_name;
   connection_timeout = timeout;
+
+  initializeStorage();
   
   // Configure SSID scroller for 18 characters max display, smooth scrolling
   ssid_scroller.setDisplayWidth(18, 108);  // 18 chars * 6 pixels = 108 pixels
@@ -70,18 +72,20 @@ std::vector<NetworkInfo> WiFiSelector::scanNetworks() {
 
 bool WiFiSelector::connectWithSavedCredentials(const std::vector<NetworkInfo>& networks) {
   if (!preferences->begin(pref_namespace.c_str(), true)) {  // true = read-only
-    Serial.println("Failed to open preferences");
+    Serial.println("Failed to open preferences because connect with saved credential return false");
     return false;
   }
-  
+
+  // If SSID key doesn't exist on a fresh device, bail out early
+  if (!preferences->isKey("ssid")) {
+    Serial.println("No saved credentials found");
+    preferences->end();
+    return false;
+  }
+
   String saved_ssid = preferences->getString("ssid", "");
   String saved_password = preferences->getString("password", "");
   preferences->end();
-  
-  if (saved_ssid.length() == 0) {
-    Serial.println("No saved credentials found");
-    return false;
-  }
   
   // Look for saved network in scan results
   for (const NetworkInfo& network : networks) {
@@ -352,4 +356,13 @@ int WiFiSelector::getSignalStrength(int32_t rssi) {
   else if (rssi >= -70) return 2; // Fair
   else if (rssi >= -80) return 1; // Weak
   else return 0;                  // Very weak
+}
+
+void WiFiSelector::initializeStorage(){
+  if (!preferences) return;
+	if (!preferences->begin(pref_namespace.c_str(), false, "nvs")) {  // true = read-only
+		Serial.println("Failed to open preferences while initializing the storage");
+		return;
+  }
+	preferences->end();
 }

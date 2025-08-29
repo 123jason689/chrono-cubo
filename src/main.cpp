@@ -899,7 +899,7 @@ void handleStateMachine() {
 }
 
 void setup() {
-    delay(5000);
+    delay(10000);
 
     entrypoint();
 
@@ -915,6 +915,8 @@ void setup() {
     pushNotifier.setAccounts(alertzyAccounts);
     auto customTimers = storageManager.loadCustomTimers();
     multiTimer.setTimers(customTimers);
+
+    Serial.print("WIFI setting up, trying to connect with previous credentials");
     
     // Attempt WiFi connection but do not block functionality if unavailable
     bool wifiConnected = false;
@@ -993,18 +995,18 @@ void initializeSystem() {
 void entrypoint(){
     Serial.begin(115200);
 
-    // Initialize NVS (required by Preferences). If partition needs erase, do that and retry.
-    esp_err_t nvs_err = nvs_flash_init();
-    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        // NVS partition was truncated/changed — erase and re-init
-        nvs_flash_erase();
-        nvs_err = nvs_flash_init();
-    }
-    if (nvs_err != ESP_OK) {
-        delay(10000);
-        Serial.printf("[setup] NVS init failed: 0x%08x\n", nvs_err);
-        // Continue but Preferences calls will likely fail until NVS is fixed
-    }
+    // // Initialize NVS (required by Preferences). If partition needs erase, do that and retry.
+    // esp_err_t nvs_err = nvs_flash_init();
+    // if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    //     // NVS partition was truncated/changed — erase and re-init
+    //     nvs_flash_erase();
+    //     nvs_err = nvs_flash_init();
+    // }
+    // if (nvs_err != ESP_OK) {
+    //     delay(10000);
+    //     Serial.printf("[setup] NVS init failed: 0x%08x\n", nvs_err);
+    //     // Continue but Preferences calls will likely fail until NVS is fixed
+    // }
 
     WiFi.mode(WIFI_STA);
     

@@ -31,6 +31,7 @@ private:
   void showConnectionResult(bool success, const String& ip = "");
   bool waitForConnection();
   void saveCredentials(const String& ssid, const String& password);
+  void initializeStorage();
   
 public:
   // Constructor

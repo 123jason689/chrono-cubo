@@ -1,15 +1,30 @@
 #include "StorageManager.h"
 #include <ArduinoJson.h>
 
-StorageManager::StorageManager(Preferences* prefs) : preferences(prefs) {}
+StorageManager::StorageManager(Preferences* prefs) : preferences(prefs) {
+	if (!preferences) return;
+	if (!preferences->begin("storage", false, "nvs")) {  // true = read-only
+		Serial.println("Failed to open storage");
+		return;
+  	}
+	preferences->end();
+}
 
 std::vector<AlertzyAccount> StorageManager::loadAlertzyAccounts() {
 	std::vector<AlertzyAccount> accounts;
 	if (!preferences) return accounts;
-	preferences->begin("storage", true, "nvs");
+	if (!preferences->begin("storage", true, "nvs")) {
+		Serial.println("StorageManager: failed to open preferences for read (alertzy_accounts)");
+		return accounts;
+	}
+	// If the key does not exist, return empty list (fresh device)
+	if (!preferences->isKey("alertzy_accounts")) {
+		preferences->end();
+		return accounts;
+	}
 	String json = preferences->getString("alertzy_accounts", "");
 	preferences->end();
-	if (json.length() == 0) return accounts;
+	if (json.length() == 0) return accounts; // no data yet
 
 	DynamicJsonDocument doc(4096);
 	auto err = deserializeJson(doc, json);
@@ -36,7 +51,10 @@ void StorageManager::saveAlertzyAccounts(const std::vector<AlertzyAccount>& acco
 	String json;
 	serializeJson(doc, json);
 	if (!preferences) return;
-	preferences->begin("storage", false, "nvs");
+	if (!preferences->begin("storage", false, "nvs")) {
+		Serial.println("StorageManager: failed to open preferences for write (alertzy_accounts)");
+		return;
+	}
 	preferences->putString("alertzy_accounts", json);
 	preferences->end();
 }
@@ -44,7 +62,15 @@ void StorageManager::saveAlertzyAccounts(const std::vector<AlertzyAccount>& acco
 std::vector<CustomTimer> StorageManager::loadCustomTimers() {
 	std::vector<CustomTimer> timers;
 	if (!preferences) return timers;
-	preferences->begin("storage", true, "nvs");
+	if (!preferences->begin("storage", true, "nvs")) {
+		Serial.println("StorageManager: failed to open preferences for read (custom_timers)");
+		return timers;
+	}
+	// If the key does not exist, return empty list (fresh device)
+	if (!preferences->isKey("custom_timers")) {
+		preferences->end();
+		return timers;
+	}
 	String json = preferences->getString("custom_timers", "");
 	preferences->end();
 	if (json.length() == 0) return timers;
@@ -100,7 +126,15 @@ void StorageManager::saveCustomTimers(const std::vector<CustomTimer>& timers) {
 std::vector<Alarm> StorageManager::loadAlarms() {
 	std::vector<Alarm> alarms;
 	if (!preferences) return alarms;
-	preferences->begin("storage", true, "nvs");
+	if (!preferences->begin("storage", true, "nvs")) {
+		Serial.println("StorageManager: failed to open preferences for read (alarms)");
+		return alarms;
+	}
+	// If the key does not exist, return empty list (fresh device)
+	if (!preferences->isKey("alarms")) {
+		preferences->end();
+		return alarms;
+	}
 	String json = preferences->getString("alarms", "");
 	preferences->end();
 	if (json.length() == 0) return alarms;
@@ -134,7 +168,10 @@ void StorageManager::saveAlarms(const std::vector<Alarm>& alarms) {
 	}
 	String json;
 	serializeJson(doc, json);
-	preferences->begin("storage", false, "nvs");
+	if (!preferences->begin("storage", false, "nvs")) {
+		Serial.println("StorageManager: failed to open preferences for write (alarms)");
+		return;
+	}
 	preferences->putString("alarms", json);
 	preferences->end();
 }
