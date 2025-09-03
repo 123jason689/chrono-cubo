@@ -150,7 +150,12 @@ bool WiFiSelector::selectAndConnectNetwork(std::vector<NetworkInfo>& networks) {
   
   init_controls();  // Initialize potentiometers and button
   
+  unsigned long startTime = millis(); // Add this line to record the start time
   while (true) {
+    // Timeout after 30 seconds if no selection is made
+    if (millis() - startTime > 30000) {
+      return false; // Exit the function if no selection is made
+    }
     // Update scrolling text when selection changes
     if (selected_network != last_selected) {
       ssid_scroller.setText(networks[selected_network].ssid);
@@ -240,6 +245,15 @@ bool WiFiSelector::selectAndConnectNetwork(std::vector<NetworkInfo>& networks) {
         // Get password using keyboard
         const char* entered_password = prompt_keyboard();
         password = String(entered_password);
+
+        Serial.println("--- WIFI DEBUG ---");
+        Serial.print("Attempting to connect to SSID: '");
+        Serial.print(network.ssid);
+        Serial.println("'");
+        Serial.print("Using Password: '");
+        Serial.print(password);
+        Serial.println("'"); // The quotes will show any trailing spaces!
+        Serial.println("--------------------");
         
         WiFi.begin(network.ssid, password);
       } else {

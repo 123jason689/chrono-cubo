@@ -26,7 +26,7 @@
 Preferences pref;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
 RTC_DS3231 rtc;
-WiFiSelector wifiSelector(&display, &pref);
+WiFiSelector wifiSelector(&display, &pref, "wifi-creds", 30000);
 TimeManager timeManager(&rtc, &display);
 StateMachine stateMachine(&display);
 SingleTimer singleTimer(&display);
@@ -519,8 +519,9 @@ void handleStateMachine() {
 
         case STATE_ALERTZY_KEY_LIST: {
             static int sel = 0;
+            static int accountIndex = 0;
             static bool drawn = false;
-            if (previousState != STATE_ALERTZY_KEY_LIST) { sel = 0; drawn = false; }
+            if (previousState != STATE_ALERTZY_KEY_LIST) { sel = 0; accountIndex = 0; drawn = false; }
 
             auto drawList = [&]() {
                 const auto& accounts = pushNotifier.getAccounts();
@@ -531,21 +532,31 @@ void handleStateMachine() {
                 display.println("Alertzy Accounts");
                 display.println("================");
 
-                // Row 0: Add New
-                for (int i = 0; i < (int)accounts.size() + 2; ++i) {
-                    int y = 16 + i * 10;
-                    if (y > 54) break;
-                    bool isSelected = (i == sel);
-                    if (isSelected) { display.fillRect(0, y - 1, SCREEN_WIDTH, 10, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK); }
-                    else { display.setTextColor(SSD1306_WHITE); }
+                // Single-item scroller: Row 0 = Add New, Row 1 = Account (one at a time), Row 2 = < Back
+                int y = 16;
+                if (sel == 0) {
+                    display.fillRect(0, y - 1, SCREEN_WIDTH, 10, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK);
+                    display.setCursor(2, y); display.print("+ Add New");
+                } else if (sel == 2) {
+                    display.fillRect(0, y - 1, SCREEN_WIDTH, 10, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK);
+                    display.setCursor(2, y); display.print("< Back");
+                } else {
+                    // show one account at a time using accountIndex
+                    int idx = accountIndex;
+                    if (idx < 0) idx = 0;
+                    if (idx >= (int)accounts.size()) idx = (int)accounts.size() - 1;
+                    display.fillRect(0, y - 1, SCREEN_WIDTH, 10, SSD1306_WHITE); display.setTextColor(SSD1306_BLACK);
                     display.setCursor(2, y);
-                    if (i == 0) display.print("+ Add New");
-                    else if (i == (int)accounts.size() + 1) display.print("< Back");
-                    else display.print(accounts[i - 1].name);
+                    if (accounts.empty()) display.print("(No accounts)");
+                    else {
+                        display.print(accounts[idx].name);
+                        display.print(" ("); display.print(idx + 1); display.print("/"); display.print(accounts.size()); display.print(")");
+                    }
                 }
+
                 display.setTextColor(SSD1306_WHITE);
                 display.setCursor(0, 56);
-                display.print("Y:Move Btn:Select");
+                display.print("Y=move X=nav Btn=select");
                 display.display();
             };
 
@@ -553,42 +564,51 @@ void handleStateMachine() {
 
             if (can_move()) {
                 int y_move = get_y_movement();
-                int maxIndex = (int)pushNotifier.getAccounts().size() + 1;
+                int maxIndex = 2; // 0=Add,1=Accounts scroller,2=Back
                 if (y_move == -1) { sel = (sel > 0) ? sel - 1 : maxIndex; drawList(); }
                 if (y_move == 1)  { sel = (sel < maxIndex) ? sel + 1 : 0; drawList(); }
+                // X-axis to navigate accounts when sel==1
+                int x_move = get_x_movement();
+                const auto& accounts = pushNotifier.getAccounts();
+                if (!accounts.empty() && sel == 1 && x_move != 0) {
+                    if (x_move == 1) accountIndex = (accountIndex + 1) % accounts.size();
+                    else accountIndex = (accountIndex - 1 + accounts.size()) % accounts.size();
+                    drawList();
+                }
             }
 
             if (select_button_pressed()) {
                 const auto& accounts = pushNotifier.getAccounts();
                 if (sel == 0) {
                     stateMachine.setState(STATE_ALERTZY_KEY_CREATE);
-                } else if (sel == (int)accounts.size() + 1) {
+                } else if (sel == 2) {
                     stateMachine.setState(STATE_SETTINGS_MENU);
                 } else {
-                    // Simple delete confirmation for selected account
-                    int target = sel - 1;
-                    display.clearDisplay();
-                    display.setTextSize(1);
-                    display.setTextColor(SSD1306_WHITE);
-                    display.setCursor(0, 20);
-                    display.print("Delete: ");
-                    display.println(accounts[target].name);
-                    display.println("");
-                    display.println("Press button to confirm");
-                    display.display();
-                    // Non-blocking wait: show message and return to list, user must press to confirm
-                    // We'll just assume quick confirm if button pressed elsewhere
-                    // delete
-                    auto vec = accounts; // copy
-                    vec.erase(vec.begin() + target);
-                    storageManager.saveAlertzyAccounts(vec);
-                    pushNotifier.setAccounts(vec);
+                    // Simple delete confirmation for selected account (sel==1 -> accountIndex)
+                    int target = accountIndex;
+                    if (target >= 0 && target < (int)accounts.size()) {
+                        display.clearDisplay();
+                        display.setTextSize(1);
+                        display.setTextColor(SSD1306_WHITE);
+                        display.setCursor(0, 20);
+                        display.print("Delete: ");
+                        display.println(accounts[target].name);
+                        display.println("");
+                        display.println("Press button to confirm");
+                        display.display();
+                        auto vec = accounts; // copy
+                        vec.erase(vec.begin() + target);
+                        storageManager.saveAlertzyAccounts(vec);
+                        pushNotifier.setAccounts(vec);
+                    }
                     sel = 0;
                     drawn = false;
                 }
             }
             break;
         }
+
+    // Converted Alertzy account list to single-item scroller above
 
         case STATE_ALERTZY_KEY_CREATE: {
             display.clearDisplay();
@@ -777,7 +797,7 @@ void handleStateMachine() {
 
         case STATE_PHASE_EDIT: {
             // Phase editor: name, duration (H/M/S), sound, notifications (accounts)
-            static int field = 0; // 0=name,1=H,2=M,3=S,4=sound,5=notify
+            static int field = 0; // 0=name,1=H,2=M,3=S,4=sound,5=notify,6=confirm
             static uint32_t dur = 60;
             static uint8_t track = 1;
             static String name = "Phase";
@@ -816,12 +836,16 @@ void handleStateMachine() {
                 display.setCursor(0, 46);
                 display.print("Notify: ");
                 const auto& accounts = pushNotifier.getAccounts();
-                for (size_t i = 0; i < accounts.size() && i < 3; ++i) { // show up to 3 for space
-                    bool on = std::find(notify.begin(), notify.end(), (uint8_t)i) != notify.end();
-                    if ((int)i == selectedNotifyIndex) display.print(">"); else display.print(" ");
-                    display.print(on ? "[x]" : "[ ]");
-                    display.print(accounts[i].name);
-                    if (i < accounts.size() - 1) display.print(" ");
+                if (accounts.empty()) {
+                    display.print("None");
+                } else {
+                    // Ensure selectedNotifyIndex is within bounds
+                    if (selectedNotifyIndex >= (int)accounts.size()) selectedNotifyIndex = 0;
+                    bool on = std::find(notify.begin(), notify.end(), (uint8_t)selectedNotifyIndex) != notify.end();
+                    display.print(on ? "[x] " : "[ ] ");
+                    display.print(accounts[selectedNotifyIndex].name);
+                    // Counter (1/N)
+                    display.print(" ("); display.print(selectedNotifyIndex + 1); display.print("/"); display.print(accounts.size()); display.print(")");
                 }
                 // Field indicator
                 display.setCursor(0, 56);
@@ -830,7 +854,8 @@ void handleStateMachine() {
                 else if (field == 2) display.print("^Minute Y=field X=+-");
                 else if (field == 3) display.print("^Second Y=field X=+-");
                 else if (field == 4) display.print("^Sound Y=field X=+-");
-                else display.print("^Notify Btn=toggle");
+                else if (field == 5) display.print("^Notify Y=field X=<> Btn=toggle");
+                else display.print("^Confirm Btn=save");
                 display.display();
             };
 
@@ -838,8 +863,8 @@ void handleStateMachine() {
 
             if (can_move()) {
                 int y_move = get_y_movement();
-                if (y_move == -1) { field = (field == 0) ? 5 : field - 1; draw(); }
-                if (y_move == 1)  { field = (field == 5) ? 0 : field + 1; draw(); }
+                if (y_move == -1) { field = (field == 0) ? 6 : field - 1; draw(); }
+                if (y_move == 1)  { field = (field == 6) ? 0 : field + 1; draw(); }
                 int x_move = get_x_movement();
                 if (x_move != 0) {
                     if (field == 1) { // hour
@@ -882,10 +907,32 @@ void handleStateMachine() {
                         auto it = std::find(notify.begin(), notify.end(), idx);
                         if (it == notify.end()) notify.push_back(idx);
                         else notify.erase(it);
+                        // flash the checkbox briefly for visual feedback
+                        draw();
+                        unsigned long __flashStart = millis();
+                        bool flashState = true;
+                        while (millis() - __flashStart < 250) {
+                            // invert box area to flash
+                            if (flashState) {
+                                display.fillRect(0, 46, SCREEN_WIDTH, 10, SSD1306_WHITE);
+                                display.setTextColor(SSD1306_BLACK);
+                                display.setCursor(0, 46);
+                                // redraw notify line inverted
+                                display.print("Notify: ");
+                                bool on_now = std::find(notify.begin(), notify.end(), (uint8_t)selectedNotifyIndex) != notify.end();
+                                display.print(on_now ? "[x] " : "[ ] ");
+                                display.print(accounts[selectedNotifyIndex].name);
+                                display.display();
+                            } else {
+                                draw();
+                            }
+                            flashState = !flashState;
+                            yield();
+                        }
                         draw();
                     }
-                } else {
-                    // Save phase and return
+                } else if (field == 6) {
+                    // Save phase and return (explicit Confirm field)
                     TimerPhase p; p.name = name; p.duration_seconds = dur; p.sound_track = track; p.alertzy_key_indices = notify;
                     if (g_editPhaseIndex >= 0 && g_editPhaseIndex < (int)g_editTimer.phases.size()) g_editTimer.phases[g_editPhaseIndex] = p;
                     else g_editTimer.phases.push_back(p);
@@ -946,23 +993,14 @@ void setup() {
     auto customTimers = storageManager.loadCustomTimers();
     multiTimer.setTimers(customTimers);
 
-    Serial.print("WIFI setting up, trying to connect with previous credentials");
-    
-    // Attempt WiFi connection but do not block functionality if unavailable
-    bool wifiConnected = false;
-    auto networks = wifiSelector.scanNetworks();
-    if (!networks.empty()) {
-        if (wifiSelector.connectWithSavedCredentials(networks)) {
-            wifiConnected = true;
-            Serial.println("Connected using saved credentials");
-        } else if (wifiSelector.selectAndConnectNetwork(networks)) {
-            wifiConnected = true;
-      Serial.println("Successfully connected to selected network");
+    Serial.println("Starting in offline-first mode.");
+    // Non-blocking attempt to connect with saved credentials
+    bool wifiConnected = wifiSelector.connectWithSavedCredentials(wifiSelector.scanNetworks());
+
+    if (wifiConnected) {
+        Serial.println("Connected to Wi-Fi using saved credentials.");
     } else {
-      Serial.println("Failed to connect to any network");
-    }
-  } else {
-        Serial.println("No networks found; starting in offline mode");
+        Serial.println("No saved Wi-Fi credentials or connection failed. Starting in offline mode.");
     }
 
     // Initialize time management (RTC always available)
